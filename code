@@ -1,0 +1,296 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, roc_curve, auc
+from scipy import stats
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score
+from sklearn.inspection import permutation_importance
+
+# Load data
+df = pd.read_csv('spotify52kData.csv')
+
+# Define the features of interest
+features = ['duration', 'danceability', 'energy', 'loudness', 'speechiness', 
+            'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']
+
+# Ensure only numeric data is processed, especially if df contains non-numeric columns
+df_numeric = df[features].select_dtypes(include=[np.number])
+
+# Data cleaning: Replace missing values with the mean of each column
+imputer = SimpleImputer(strategy='mean')
+df_imputed = imputer.fit_transform(df_numeric)
+
+# Scaling the features
+scaler = StandardScaler()
+df_scaled = scaler.fit_transform(df_imputed)
+
+# Dimension reduction with PCA: use all components
+pca = PCA()
+principalComponents = pca.fit_transform(df_scaled)
+principalDf = pd.DataFrame(data=principalComponents,
+                           columns=[f'Principal Component {i+1}' for i in range(pca.n_components_)])
+
+# QUESTION 1
+fig, axes = plt.subplots(5, 2, figsize=(35, 55))
+axes = axes.flatten()
+for i, feature in enumerate(features):
+    mean_value = df[feature].mean()
+    std_dev = df[feature].std()
+    sampled_df = df.sample(n=15777, random_state=778)
+    axes[i].hist(sampled_df[feature], bins=228, color='skyblue', edgecolor='black')
+    axes[i].set_title(f'Histogram of {feature}\nMean: {mean_value:.2f}, Std Dev: {std_dev:.2f}')
+    axes[i].set_xlabel('Values')
+    axes[i].set_ylabel('Frequency')
+plt.tight_layout()
+plt.show()
+
+# QUESTION 2
+# Scatter plot for duration vs popularity
+plt.figure(figsize=(11, 7))
+plt.scatter(df['duration'], df['popularity'], alpha=0.5)
+plt.title('Relationship between Duration and Popularity')
+plt.xlabel('Duration')
+plt.ylabel('Popularity')
+plt.grid(True)
+plt.show()
+
+# Correlation and p-value for time signature and duration
+correlation = df[['popularity', 'duration']].corr(method='pearson')
+corr_coeff, p_value = stats.pearsonr(df['popularity'], df['duration'])
+print("Correlation coefficient:", correlation)
+print("P-value for the correlation:", p_value)
+
+# QUESTION 3
+# Explicit content vs. popularity analysis
+explicit_popularity = df[df['explicit'] == 1]['popularity']
+non_explicit_popularity = df[df['explicit'] == 0]['popularity']
+u_statistic, p_value_mw = stats.mannwhitneyu(explicit_popularity, non_explicit_popularity, alternative='greater')
+print("Mann-Whitney U statistic:", u_statistic)
+print("P-value for the test:", p_value_mw)
+print("Explicit songs are statistically more popular than non-explicit songs." if p_value_mw < 0.05 else "There is no significant difference in popularity between explicit and non-explicit songs.")
+
+# QUESTION 4
+# Mode vs. popularity analysis
+minor_popularity = df[df['mode'] == 0]['popularity']
+major_popularity = df[df['mode'] == 1]['popularity']
+u_statistic2, p_value_mw2 = stats.mannwhitneyu(major_popularity, minor_popularity, alternative='greater')
+print("Mann-Whitney U statistic:", u_statistic2)
+print("P-value for the test:", p_value_mw2)
+print("Songs in Major are statistically more popular." if p_value_mw2 < 0.05 else "There is no significant difference in popularity between songs in major and minor modes.")
+
+# QUESTION 5
+corr_coeff, p_value = stats.spearmanr(df['energy'], df['loudness'])
+print("Spearman's rank correlation coefficient:", corr_coeff)
+print("P-value for the correlation:", p_value)
+
+# Scatter plot for Energy and Loudness
+plt.figure(figsize=(20, 10))
+plt.scatter(df['energy'], df['loudness'], alpha=0.5)
+plt.title('Scatterplot for Energy and Loudness')
+plt.xlabel('Energy')
+plt.ylabel('Loudness')
+plt.grid(True)
+plt.show()
+
+# Checking correlation of other features with Loudness using Spearman's Rank Correlation
+for feature in features:
+    corr_coeff, p_value = stats.spearmanr(df[feature], df['loudness'])
+    print(f"Spearman's rank correlation coefficient between {feature} and loudness: {corr_coeff:.3f}")
+    print(f"P-value for the correlation between {feature} and loudness: {p_value:.5f}")
+# After seeing the results, energy has the highest correlation with loudness
+
+# QUESTION 6
+r_squared_values = {}
+
+for feature in features:
+    X = df[[feature]]  # Reshape for a single feature
+    y = df['popularity']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=778)
+
+    model = RandomForestRegressor(n_estimators=700, random_state=778)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+
+    r_squared = r2_score(y_test, predictions)
+    r_squared_values[feature] = r_squared
+
+    print(f"R-squared for {feature}: {r_squared:.4f}")
+
+# Identify the best performing feature
+best_feature = max(r_squared_values, key=r_squared_values.get)
+best_r_squared = r_squared_values[best_feature]
+print(f"\nThe best predicting feature is {best_feature} with an R-squared of {best_r_squared:.4f}")
+
+# QUESTION 7 - Combined Features Model
+X = df[features]
+y = df['popularity']
+
+# Split the data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=778)
+
+# Initialize and train the Random Forest model
+model = RandomForestRegressor(n_estimators=700, random_state=778)
+model.fit(X_train, y_train)
+
+# Predictions and evaluation
+predictions = model.predict(X_test)
+r_squared_combined = r2_score(y_test, predictions)
+
+print(f"The R-squared for this new model that factors in all elements from question 1 is: {r_squared_combined:.4f}")
+print(f"Improvement over the best single feature model: {r_squared_combined - best_r_squared:.4f}")
+
+# Feature importance
+importances = model.feature_importances_
+sorted_indices = np.argsort(importances)[::-1]
+
+# Cross-validation to see the variability and average performance of the model
+scores = cross_val_score(model, X, y, cv=5, scoring='r2')
+
+print("R-squared scores:", scores)
+print("Average R-squared:", np.mean(scores))
+print("Standard Deviation of R-squared:", np.std(scores))
+
+# Permutation importance for evaluating significance
+perm_importance = permutation_importance(model, X_test, y_test, n_repeats=30, random_state=778)
+for i in sorted_indices:
+    print(f"Permutation importance for {features[i]}: {perm_importance.importances_mean[i]:.4f} +/- {perm_importance.importances_std[i]:.4f}")
+
+# QUESTION 8 - Extracting meaningful principal components
+eigVals = pca.explained_variance_
+
+# Kaiser criterion: eigenvalues greater than 1
+kaiserThreshold = 1
+significant_components = eigVals[eigVals > kaiserThreshold]
+kaiser_components_count = len(significant_components)
+total_variance_explained = sum(significant_components) / sum(eigVals) * 100
+
+# Plotting eigenvalues with the Kaiser threshold
+plt.figure(figsize=(10, 7))
+plt.bar(range(1, len(eigVals) + 1), eigVals, color="brown", label="Eigenvalues")
+plt.axhline(y=kaiserThreshold, color="orange", linestyle="--", label="Kaiser criterion (Eigenvalue = 1)")
+plt.xlabel('Principal Component')
+plt.ylabel('Eigenvalue')
+plt.title('Scatterplot of Eigenvalues with Kaiser Criterion')
+plt.legend()
+plt.show()
+
+print(f"Number of meaningful components by Kaiser criterion: {kaiser_components_count}")
+print(f"Proportion of total variance explained by these components: {total_variance_explained:.2f}%")
+
+# QUESTION 9 - Predicting major or minor key from 'valence'
+X_valence = df[['valence']].values
+y_mode = df['mode'].values
+
+# Split the data for mode prediction
+X_train_v, X_test_v, y_train_v, y_test_v = train_test_split(X_valence, y_mode, test_size=0.3, random_state=778)
+
+logreg_mode = LogisticRegression()
+logreg_mode.fit(X_train_v, y_train_v)
+y_pred_v = logreg_mode.predict(X_test_v)
+
+print("Accuracy for mode prediction from valence:", accuracy_score(y_test_v, y_pred_v))
+print("Classification report for mode prediction:\n", classification_report(y_test_v, y_pred_v))
+
+# Calculate ROC curve and AUC for mode prediction
+y_pred_v_proba = logreg_mode.predict_proba(X_test_v)[:, 1]
+fpr_v, tpr_v, _ = roc_curve(y_test_v, y_pred_v_proba)
+roc_auc_v = auc(fpr_v, tpr_v)
+
+plt.figure()
+plt.plot(fpr_v, tpr_v, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc_v:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic for Mode Prediction from Valence')
+plt.legend(loc="lower right")
+plt.show()
+
+# QUESTION 10 - Comparing predictors for classifying a song as classical
+df['is_classical'] = (df['track_genre'] == 'classical').astype(int)
+
+X_duration = df[['duration']].values
+X_pca = principalDf.values
+y_genre = df['is_classical'].values
+
+# Split the data for duration and PCA
+X_train_d, X_test_d, y_train_d, y_test_d = train_test_split(X_duration, y_genre, test_size=0.3, random_state=778)
+X_train_p, X_test_p, y_train_p, y_test_p = train_test_split(X_pca, y_genre, test_size=0.3, random_state=778)
+
+logreg_duration = LogisticRegression()
+logreg_duration.fit(X_train_d, y_train_d)
+y_pred_d = logreg_duration.predict(X_test_d)
+
+logreg_pca = LogisticRegression()
+logreg_pca.fit(X_train_p, y_train_p)
+y_pred_p = logreg_pca.predict(X_test_p)
+
+print("Accuracy for classical prediction from duration:", accuracy_score(y_test_d, y_pred_d))
+print("Classification report for duration:\n", classification_report(y_test_d, y_pred_d))
+print("Accuracy for classical prediction from PCA components:", accuracy_score(y_test_p, y_pred_p))
+print("Classification report for PCA components:\n", classification_report(y_test_p, y_pred_p))
+
+# Calculate ROC curve and AUC for duration
+y_pred_d_proba = logreg_duration.predict_proba(X_test_d)[:, 1]
+fpr_d, tpr_d, _ = roc_curve(y_test_d, y_pred_d_proba)
+roc_auc_d = auc(fpr_d, tpr_d)
+
+plt.figure()
+plt.plot(fpr_d, tpr_d, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc_d:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic for Classical Prediction from Duration')
+plt.legend(loc="lower right")
+plt.show()
+
+# Calculate ROC curve and AUC for PCA components
+y_pred_p_proba = logreg_pca.predict_proba(X_test_p)[:, 1]
+fpr_p, tpr_p, _ = roc_curve(y_test_p, y_pred_p_proba)
+roc_auc_p = auc(fpr_p, tpr_p)
+
+plt.figure()
+plt.plot(fpr_p, tpr_p, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc_p:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic for Classical Prediction from PCA Components')
+plt.legend(loc="lower right")
+plt.show()
+
+
+
+#EXTRA RESEARCH
+key_popularity = df.groupby('key')['popularity'].mean().reset_index()
+
+# Plot the relationship
+plt.figure(figsize=(12, 6))
+sns.barplot(x='key', y='popularity', data=key_popularity, palette='viridis')
+plt.title('Average Popularity by Key')
+plt.xlabel('Key')
+plt.ylabel('Average Popularity')
+plt.show()
+
+# Statistical test to see if key has a significant effect on popularity
+anova_result = stats.f_oneway(*(df[df['key'] == k]['popularity'] for k in df['key'].unique()))
+print(f"ANOVA result for key effect on popularity: F-statistic = {anova_result.statistic:.4f}, p-value = {anova_result.pvalue:.4f}")
+
+# Post-hoc analysis with Tukey's HSD test if ANOVA is significant
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+
+tukey = pairwise_tukeyhsd(endog=df['popularity'], groups=df['key'], alpha=0.05)
+print(tukey)
+
+
